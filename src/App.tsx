@@ -10,13 +10,17 @@ import HistoryPage from './pages/HistoryPage'
 import SessionDetailPage from './pages/SessionDetailPage'
 
 function SetupGuard({ children }: { children: React.ReactNode }) {
-  const settings = useLiveQuery(() => db.appSettings.get(1))
+  // Wrap in object so we can distinguish "loading" (undefined) from "not found" (null)
+  const result = useLiveQuery(async () => {
+    const settings = await db.appSettings.get(1)
+    return { settings: settings ?? null }
+  })
 
   // Still loading
-  if (settings === undefined) return null
+  if (result === undefined) return null
 
   // No sequence selected — redirect to setup
-  if (!settings?.selectedRoutineSequenceId) {
+  if (!result.settings?.selectedRoutineSequenceId) {
     return <Navigate to="/setup" replace />
   }
 

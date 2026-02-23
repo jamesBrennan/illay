@@ -1,46 +1,26 @@
-import { useReducer, useEffect, useCallback, useState } from 'react'
+import { useEffect, useCallback, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
 import { buildExerciseList, getNextPosition } from '../lib/routineLogic'
-import type { SessionState, SessionAction, ExerciseWithSets } from '../models/types'
+import type { ExerciseWithSets } from '../models/types'
 import ExerciseCard from '../components/ExerciseCard'
 import SetInput from '../components/SetInput'
 import RestTimer from '../components/RestTimer'
 import { useRestTimer } from '../hooks/useRestTimer'
 import { useAudioAlert } from '../hooks/useAudioAlert'
 
-function sessionReducer(state: SessionState, action: SessionAction): SessionState {
-  switch (action.type) {
-    case 'COMPLETE_SET':
-      return { ...state, phase: 'resting' }
-    case 'SKIP_REST':
-    case 'REST_FINISHED': {
-      const next = getNextPosition(state.exerciseIndex, state.setIndex, state.exerciseList)
-      if (!next) return { ...state, phase: 'complete' }
-      return {
-        ...state,
-        exerciseIndex: next.exerciseIndex,
-        setIndex: next.setIndex,
-        phase: 'recording',
-      }
-    }
-    case 'RESUME':
-      return {
-        ...state,
-        exerciseIndex: action.exerciseIndex,
-        setIndex: action.setIndex,
-        phase: 'recording',
-      }
-    default:
-      return state
-  }
-}
+type Phase = 'recording' | 'resting' | 'complete'
 
 export default function SessionPage() {
   const navigate = useNavigate()
   const { init: initAudio, play: playAlert } = useAudioAlert()
   const [previousWeights, setPreviousWeights] = useState<Map<string, number>>(new Map())
+
+  const [exerciseIndex, setExerciseIndex] = useState(0)
+  const [setIndex, setSetIndex] = useState(0)
+  const [phase, setPhase] = useState<Phase>('recording')
+  const [resumed, setResumed] = useState(false)
 
   // Find the current in-progress session
   const session = useLiveQuery(async () => {
@@ -60,50 +40,38 @@ export default function SessionPage() {
 
   const exerciseList = sessionData?.exerciseList ?? []
 
-  const [state, dispatch] = useReducer(sessionReducer, {
-    exerciseIndex: 0,
-    setIndex: 0,
-    phase: 'recording' as const,
-    exerciseList: [],
-  })
-
-  // Sync exerciseList into state when loaded
+  // Resume from existing sets — runs once per session
+  const sessionId = session?.id
   useEffect(() => {
-    if (exerciseList.length > 0 && state.exerciseList.length === 0) {
-      dispatch({ type: 'RESUME', exerciseIndex: 0, setIndex: 0 })
-    }
-  }, [exerciseList.length, state.exerciseList.length])
-
-  // Update exerciseList reference in state
-  const currentState: SessionState = { ...state, exerciseList }
-
-  // Resume from existing sets
-  useEffect(() => {
-    if (!session || exerciseList.length === 0) return
-    let cancelled = false
+    if (!sessionId || exerciseList.length === 0 || resumed) return
 
     db.workoutSets
       .where('sessionId')
-      .equals(session.id)
+      .equals(sessionId)
       .count()
       .then((completedSets) => {
-        if (cancelled || completedSets === 0) return
-        // Walk through exercises to find resume position
+        if (completedSets === 0) {
+          setResumed(true)
+          return
+        }
         let remaining = completedSets
         for (let ei = 0; ei < exerciseList.length; ei++) {
           const sets = exerciseList[ei].targetSets
           if (remaining < sets) {
-            dispatch({ type: 'RESUME', exerciseIndex: ei, setIndex: remaining })
+            setExerciseIndex(ei)
+            setSetIndex(remaining)
+            setResumed(true)
             return
           }
           remaining -= sets
         }
-        // All sets done — mark complete
-        dispatch({ type: 'RESUME', exerciseIndex: exerciseList.length - 1, setIndex: exerciseList[exerciseList.length - 1].targetSets - 1 })
+        // All sets done
+        setExerciseIndex(exerciseList.length - 1)
+        setSetIndex(exerciseList[exerciseList.length - 1].targetSets)
+        setPhase('complete')
+        setResumed(true)
       })
-
-    return () => { cancelled = true }
-  }, [session?.id, exerciseList.length])
+  }, [sessionId, exerciseList.length, resumed])
 
   // Load previous weights for pre-fill
   useEffect(() => {
@@ -132,20 +100,31 @@ export default function SessionPage() {
     return () => { cancelled = true }
   }, [session?.id, session?.routineSequenceId])
 
+  // Ref to current position for use in callbacks
+  const posRef = useRef({ exerciseIndex, setIndex })
+  posRef.current = { exerciseIndex, setIndex }
+
+  const advanceToNext = useCallback(() => {
+    const next = getNextPosition(posRef.current.exerciseIndex, posRef.current.setIndex, exerciseList)
+    if (!next) {
+      setPhase('complete')
+      return
+    }
+    setExerciseIndex(next.exerciseIndex)
+    setSetIndex(next.setIndex)
+    setPhase('recording')
+  }, [exerciseList])
+
   const handleRestFinished = useCallback(() => {
     playAlert()
-    dispatch({ type: 'REST_FINISHED' })
-  }, [playAlert])
+    advanceToNext()
+  }, [playAlert, advanceToNext])
 
   const { secondsLeft, isRunning, start: startRest, skip: skipRest } = useRestTimer(handleRestFinished)
 
   // Init audio on first user interaction
   useEffect(() => {
-    const handler = () => {
-      initAudio()
-      window.removeEventListener('touchstart', handler)
-      window.removeEventListener('click', handler)
-    }
+    const handler = () => { initAudio() }
     window.addEventListener('touchstart', handler, { once: true })
     window.addEventListener('click', handler, { once: true })
     return () => {
@@ -164,37 +143,34 @@ export default function SessionPage() {
       }).catch(() => {})
     }
 
-    return () => {
-      wakeLock?.release()
-    }
+    return () => { wakeLock?.release() }
   }, [])
 
   async function handleSetComplete(weight: number, reps: number) {
     if (!session) return
 
-    const currentExercise = exerciseList[currentState.exerciseIndex]
+    const currentExercise = exerciseList[exerciseIndex]
     if (!currentExercise) return
 
     await db.workoutSets.add({
       id: crypto.randomUUID(),
       sessionId: session.id,
       exerciseId: currentExercise.exercise.id,
-      orderIndex: currentState.setIndex,
+      orderIndex: setIndex,
       weight,
       reps,
       completedAt: new Date(),
     })
 
     // Check if this was the last set of the last exercise
-    const next = getNextPosition(currentState.exerciseIndex, currentState.setIndex, exerciseList)
+    const next = getNextPosition(exerciseIndex, setIndex, exerciseList)
     if (!next) {
       await db.sessions.update(session.id, { completedAt: new Date() })
-      dispatch({ type: 'COMPLETE_SET' })
       navigate(`/summary/${session.id}`, { replace: true })
       return
     }
 
-    dispatch({ type: 'COMPLETE_SET' })
+    setPhase('resting')
     startRest()
   }
 
@@ -212,7 +188,7 @@ export default function SessionPage() {
     )
   }
 
-  const currentExercise = exerciseList[currentState.exerciseIndex] as ExerciseWithSets | undefined
+  const currentExercise = exerciseList[exerciseIndex] as ExerciseWithSets | undefined
   if (!currentExercise) {
     navigate('/')
     return null
@@ -239,14 +215,15 @@ export default function SessionPage() {
 
       <ExerciseCard
         exerciseWithSets={currentExercise}
-        currentSet={currentState.setIndex}
+        currentSet={setIndex}
       />
 
       <div className="mt-6">
-        {currentState.phase === 'resting' && isRunning ? (
+        {phase === 'resting' && isRunning ? (
           <RestTimer secondsLeft={secondsLeft} onSkip={skipRest} />
         ) : (
           <SetInput
+            key={`${exerciseIndex}-${setIndex}`}
             targetReps={currentExercise.targetReps}
             previousWeight={prevWeight}
             onComplete={handleSetComplete}
