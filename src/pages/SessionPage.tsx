@@ -2,7 +2,7 @@ import { useEffect, useCallback, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db'
-import { buildExerciseList, getNextPosition } from '../lib/routineLogic'
+import { buildExerciseList, getNextPosition, buildPreviousWeights } from '../lib/routineLogic'
 import type { ExerciseWithSets } from '../models/types'
 import ExerciseCard from '../components/ExerciseCard'
 import SetInput from '../components/SetInput'
@@ -16,6 +16,7 @@ export default function SessionPage() {
   const navigate = useNavigate()
   const { init: initAudio, play: playAlert } = useAudioAlert()
   const [previousWeights, setPreviousWeights] = useState<Map<string, number>>(new Map())
+  const [sessionWeights, setSessionWeights] = useState<Map<string, number>>(new Map())
 
   const [exerciseIndex, setExerciseIndex] = useState(0)
   const [setIndex, setSetIndex] = useState(0)
@@ -48,12 +49,22 @@ export default function SessionPage() {
     db.workoutSets
       .where('sessionId')
       .equals(sessionId)
-      .count()
-      .then((completedSets) => {
-        if (completedSets === 0) {
+      .toArray()
+      .then((existingSets) => {
+        if (existingSets.length === 0) {
           setResumed(true)
           return
         }
+
+        // Hydrate sessionWeights from existing sets
+        const weights = new Map<string, number>()
+        for (const s of existingSets) {
+          weights.set(s.exerciseId, s.weight)
+        }
+        setSessionWeights(weights)
+
+        // Resume position
+        const completedSets = existingSets.length
         let remaining = completedSets
         for (let ei = 0; ei < exerciseList.length; ei++) {
           const sets = exerciseList[ei].targetSets
@@ -73,7 +84,9 @@ export default function SessionPage() {
       })
   }, [sessionId, exerciseList.length, resumed])
 
-  // Load previous weights for pre-fill
+  // Load previous weights for pre-fill (with cross-session increment).
+  // Scans all completed sessions in the sequence so exercises shared across
+  // routines (e.g. Squat in both Workout A and B) pick up their most recent weight.
   useEffect(() => {
     if (!session) return
     let cancelled = false
@@ -83,18 +96,22 @@ export default function SessionPage() {
       .equals(session.routineSequenceId)
       .filter((s) => !!s.completedAt && s.id !== session.id)
       .sortBy('startedAt')
-      .then(async (sessions) => {
-        if (cancelled || sessions.length === 0) return
-        const lastSession = sessions[sessions.length - 1]
-        const sets = await db.workoutSets
-          .where('sessionId')
-          .equals(lastSession.id)
-          .toArray()
-        const weights = new Map<string, number>()
-        for (const s of sets) {
-          weights.set(s.exerciseId, s.weight)
+      .then(async (completedSessions) => {
+        if (cancelled || completedSessions.length === 0) return
+
+        const exercises = await db.exercises.toArray()
+        const incrementMap = new Map(exercises.map((e) => [e.id, e.weightIncrement]))
+
+        const sessionSets = []
+        for (const s of completedSessions) {
+          const sets = await db.workoutSets
+            .where('sessionId')
+            .equals(s.id)
+            .toArray()
+          sessionSets.push({ startedAt: s.startedAt, sets })
         }
-        if (!cancelled) setPreviousWeights(weights)
+
+        if (!cancelled) setPreviousWeights(buildPreviousWeights(sessionSets, incrementMap))
       })
 
     return () => { cancelled = true }
@@ -162,6 +179,9 @@ export default function SessionPage() {
       completedAt: new Date(),
     })
 
+    // Track weight for intra-session auto-fill
+    setSessionWeights((prev) => new Map(prev).set(currentExercise.exercise.id, weight))
+
     // Check if this was the last set of the last exercise
     const next = getNextPosition(exerciseIndex, setIndex, exerciseList)
     if (!next) {
@@ -194,7 +214,9 @@ export default function SessionPage() {
     return null
   }
 
-  const prevWeight = previousWeights.get(currentExercise.exercise.id) ?? 0
+  const prevWeight = sessionWeights.get(currentExercise.exercise.id)
+    ?? previousWeights.get(currentExercise.exercise.id)
+    ?? 0
 
   return (
     <div className="max-w-md mx-auto pt-2">

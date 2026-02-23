@@ -4,6 +4,7 @@ import {
   getNextPosition,
   computeSessionTotals,
   buildExerciseList,
+  buildPreviousWeights,
 } from './routineLogic'
 import type { Exercise, Routine, ExerciseWithSets } from '../models/types'
 
@@ -32,12 +33,12 @@ describe('getNextRoutineIndex', () => {
 describe('getNextPosition', () => {
   const exerciseList: ExerciseWithSets[] = [
     {
-      exercise: { id: 'a', name: 'A', defaultSets: 3, defaultReps: 5 },
+      exercise: { id: 'a', name: 'A', defaultSets: 3, defaultReps: 5, weightIncrement: 5 },
       targetSets: 3,
       targetReps: 5,
     },
     {
-      exercise: { id: 'b', name: 'B', defaultSets: 2, defaultReps: 8 },
+      exercise: { id: 'b', name: 'B', defaultSets: 2, defaultReps: 8, weightIncrement: 5 },
       targetSets: 2,
       targetReps: 8,
     },
@@ -83,8 +84,8 @@ describe('computeSessionTotals', () => {
 describe('buildExerciseList', () => {
   it('builds list from routine and exercise map', () => {
     const exercises: Exercise[] = [
-      { id: 'squat', name: 'Squat', defaultSets: 5, defaultReps: 5 },
-      { id: 'bench', name: 'Bench', defaultSets: 5, defaultReps: 5 },
+      { id: 'squat', name: 'Squat', defaultSets: 5, defaultReps: 5, weightIncrement: 5 },
+      { id: 'bench', name: 'Bench', defaultSets: 5, defaultReps: 5, weightIncrement: 5 },
     ]
     const routine: Routine = {
       id: 'r1',
@@ -108,8 +109,99 @@ describe('buildExerciseList', () => {
       orderIndex: 0,
       exerciseIds: ['squat', 'missing'],
     }
-    const map = new Map([['squat', { id: 'squat', name: 'Squat', defaultSets: 5, defaultReps: 5 }]])
+    const map = new Map([['squat', { id: 'squat', name: 'Squat', defaultSets: 5, defaultReps: 5, weightIncrement: 5 }]])
     const result = buildExerciseList(routine, map)
     expect(result).toHaveLength(1)
+  })
+})
+
+describe('buildPreviousWeights', () => {
+  const increments = new Map([
+    ['squat', 5],
+    ['bench-press', 5],
+    ['overhead-press', 5],
+    ['deadlift', 10],
+    ['push-up', 0],
+  ])
+
+  it('returns empty map when no sessions', () => {
+    expect(buildPreviousWeights([], increments)).toEqual(new Map())
+  })
+
+  it('applies increment to last session weight', () => {
+    const result = buildPreviousWeights([
+      {
+        startedAt: new Date('2025-01-01'),
+        sets: [{ exerciseId: 'squat', weight: 135 }],
+      },
+    ], increments)
+    expect(result.get('squat')).toBe(140) // 135 + 5
+  })
+
+  it('uses most recent session per exercise across different workouts', () => {
+    // Simulates StrongLifts: Workout A (squat+bench), then Workout B (squat+OHP)
+    const result = buildPreviousWeights([
+      {
+        startedAt: new Date('2025-01-01'),
+        sets: [
+          { exerciseId: 'squat', weight: 60 },
+          { exerciseId: 'bench-press', weight: 50 },
+        ],
+      },
+      {
+        startedAt: new Date('2025-01-03'),
+        sets: [
+          { exerciseId: 'squat', weight: 65 },
+          { exerciseId: 'overhead-press', weight: 40 },
+        ],
+      },
+    ], increments)
+
+    // Squat: most recent is 65 (from Jan 3) + 5 = 70
+    expect(result.get('squat')).toBe(70)
+    // Bench: most recent is 50 (from Jan 1) + 5 = 55
+    expect(result.get('bench-press')).toBe(55)
+    // OHP: most recent is 40 (from Jan 3) + 5 = 45
+    expect(result.get('overhead-press')).toBe(45)
+  })
+
+  it('does not increment bodyweight exercises', () => {
+    const result = buildPreviousWeights([
+      {
+        startedAt: new Date('2025-01-01'),
+        sets: [{ exerciseId: 'push-up', weight: 0 }],
+      },
+    ], increments)
+    expect(result.get('push-up')).toBe(0)
+  })
+
+  it('applies correct increment per exercise (deadlift gets +10)', () => {
+    const result = buildPreviousWeights([
+      {
+        startedAt: new Date('2025-01-01'),
+        sets: [
+          { exerciseId: 'squat', weight: 100 },
+          { exerciseId: 'deadlift', weight: 150 },
+        ],
+      },
+    ], increments)
+    expect(result.get('squat')).toBe(105)    // +5
+    expect(result.get('deadlift')).toBe(160) // +10
+  })
+
+  it('takes the later weight when same exercise appears in multiple sessions', () => {
+    // User squatted 100 in Workout A, then 105 in Workout B
+    const result = buildPreviousWeights([
+      {
+        startedAt: new Date('2025-01-01'),
+        sets: [{ exerciseId: 'squat', weight: 100 }],
+      },
+      {
+        startedAt: new Date('2025-01-03'),
+        sets: [{ exerciseId: 'squat', weight: 105 }],
+      },
+    ], increments)
+    // Should use 105 (Jan 3), not 100 (Jan 1)
+    expect(result.get('squat')).toBe(110) // 105 + 5
   })
 })

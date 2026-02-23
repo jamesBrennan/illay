@@ -5,21 +5,21 @@ import type { Exercise, Routine, RoutineSequence } from '../models/types'
 
 const exercises: Exercise[] = [
   // Barbell
-  { id: 'squat', name: 'Squat', defaultSets: 5, defaultReps: 5 },
-  { id: 'bench-press', name: 'Bench Press', defaultSets: 5, defaultReps: 5 },
-  { id: 'deadlift', name: 'Deadlift', defaultSets: 1, defaultReps: 5 },
-  { id: 'overhead-press', name: 'Overhead Press', defaultSets: 5, defaultReps: 5 },
-  { id: 'barbell-row', name: 'Barbell Row', defaultSets: 5, defaultReps: 5 },
-  { id: 'power-clean', name: 'Power Clean', defaultSets: 5, defaultReps: 3 },
+  { id: 'squat', name: 'Squat', defaultSets: 5, defaultReps: 5, weightIncrement: 5 },
+  { id: 'bench-press', name: 'Bench Press', defaultSets: 5, defaultReps: 5, weightIncrement: 5 },
+  { id: 'deadlift', name: 'Deadlift', defaultSets: 1, defaultReps: 5, weightIncrement: 10 },
+  { id: 'overhead-press', name: 'Overhead Press', defaultSets: 5, defaultReps: 5, weightIncrement: 5 },
+  { id: 'barbell-row', name: 'Barbell Row', defaultSets: 5, defaultReps: 5, weightIncrement: 5 },
+  { id: 'power-clean', name: 'Power Clean', defaultSets: 5, defaultReps: 3, weightIncrement: 5 },
   // Bodyweight
-  { id: 'push-up', name: 'Push-Up', defaultSets: 3, defaultReps: 10 },
-  { id: 'dip', name: 'Dip', defaultSets: 3, defaultReps: 8 },
-  { id: 'pull-up', name: 'Pull-Up', defaultSets: 3, defaultReps: 5 },
-  { id: 'inverted-row', name: 'Inverted Row', defaultSets: 3, defaultReps: 8 },
-  { id: 'bodyweight-squat', name: 'Bodyweight Squat', defaultSets: 3, defaultReps: 15 },
-  { id: 'lunge', name: 'Lunge', defaultSets: 3, defaultReps: 10 },
-  { id: 'glute-bridge', name: 'Glute Bridge', defaultSets: 3, defaultReps: 12 },
-  { id: 'plank', name: 'Plank', defaultSets: 3, defaultReps: 30 }, // reps = seconds
+  { id: 'push-up', name: 'Push-Up', defaultSets: 3, defaultReps: 10, weightIncrement: 0 },
+  { id: 'dip', name: 'Dip', defaultSets: 3, defaultReps: 8, weightIncrement: 0 },
+  { id: 'pull-up', name: 'Pull-Up', defaultSets: 3, defaultReps: 5, weightIncrement: 0 },
+  { id: 'inverted-row', name: 'Inverted Row', defaultSets: 3, defaultReps: 8, weightIncrement: 0 },
+  { id: 'bodyweight-squat', name: 'Bodyweight Squat', defaultSets: 3, defaultReps: 15, weightIncrement: 0 },
+  { id: 'lunge', name: 'Lunge', defaultSets: 3, defaultReps: 10, weightIncrement: 0 },
+  { id: 'glute-bridge', name: 'Glute Bridge', defaultSets: 3, defaultReps: 12, weightIncrement: 0 },
+  { id: 'plank', name: 'Plank', defaultSets: 3, defaultReps: 30, weightIncrement: 0 }, // reps = seconds
 ]
 
 // Routine Sequences

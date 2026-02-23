@@ -5,6 +5,7 @@ export interface Exercise {
   name: string
   defaultSets: number
   defaultReps: number
+  weightIncrement: number // lbs to add each session; 0 for bodyweight
 }
 
 export interface Routine {

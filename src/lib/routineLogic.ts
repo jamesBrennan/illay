@@ -58,6 +58,34 @@ export function getNextPosition(
 }
 
 /**
+ * Given historical sessions with their sets, compute the pre-fill weight for
+ * each exercise. Takes the most recent weight per exercise across all sessions,
+ * then applies the per-exercise increment.
+ */
+export function buildPreviousWeights(
+  sessionSets: { startedAt: Date; sets: { exerciseId: string; weight: number }[] }[],
+  incrementMap: Map<string, number>,
+): Map<string, number> {
+  const latest = new Map<string, { weight: number; startedAt: Date }>()
+
+  for (const session of sessionSets) {
+    for (const set of session.sets) {
+      const prev = latest.get(set.exerciseId)
+      if (!prev || session.startedAt > prev.startedAt) {
+        latest.set(set.exerciseId, { weight: set.weight, startedAt: session.startedAt })
+      }
+    }
+  }
+
+  const weights = new Map<string, number>()
+  for (const [exerciseId, { weight }] of latest) {
+    const increment = incrementMap.get(exerciseId) ?? 0
+    weights.set(exerciseId, weight + increment)
+  }
+  return weights
+}
+
+/**
  * Compute total completed sets, reps, and weight from workout sets.
  */
 export function computeSessionTotals(sets: { weight: number; reps: number }[]): {
